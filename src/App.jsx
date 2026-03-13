@@ -928,7 +928,12 @@ function AppInner() {
 
 export default function App() {
   return (
-    <ClerkProvider publishableKey={CLERK_PK}>
+    <ClerkProvider
+      publishableKey={CLERK_PK}
+      isSatellite
+      domain="finance.thebulowgroup.com"
+      signInUrl="https://finance.thebulowgroup.com"
+    >
       <AppInner />
     </ClerkProvider>
   );
