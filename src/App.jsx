@@ -26,6 +26,7 @@ const STATUS = {
   pending:   { label: "Pending",   color: C.amber, bg: "rgba(217,119,6,0.10)"  },
   approved:  { label: "Approved",  color: C.green, bg: C.greenBg              },
   rejected:  { label: "Rejected",  color: C.red,   bg: C.redBg               },
+  returned:  { label: "Returned",  color: C.amber, bg: "rgba(217,119,6,0.10)"  },
   cancelled: { label: "Cancelled", color: C.textMuted, bg: "#f0f2f5"          },
 };
 
@@ -106,6 +107,7 @@ function Btn({ children, onClick, variant = "primary", disabled, small, fullWidt
     primary: { background: C.accent,   color: "#fff",        border: "none" },
     success: { background: C.greenBg,  color: C.green,       border: `1px solid ${C.green}44` },
     danger:  { background: C.redBg,    color: C.red,         border: `1px solid ${C.red}44` },
+    warn:    { background: "rgba(217,119,6,0.10)", color: C.amber, border: `1px solid ${C.amber}44` },
     ghost:   { background: "transparent", color: C.textSecondary, border: `1px solid ${C.border}` },
     outline: { background: "transparent", color: C.accent,   border: `1px solid ${C.accent}` },
   };
@@ -329,6 +331,14 @@ function RequestRow({ req, onClick, showApprovers }) {
             </span>
           )}
         </div>
+        {req.status === "returned" && req.returnComment && (
+          <div style={{
+            marginTop: 8, padding: "8px 12px", background: "rgba(217,119,6,0.06)",
+            border: `1px solid ${C.amber}33`, borderRadius: 6, fontSize: 12, color: C.amber,
+          }}>
+            <strong>Sent back:</strong> {req.returnComment}
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -390,14 +400,20 @@ function Dashboard({ user, isAdmin, onView }) {
     </div>
   );
 
+  const myReturned = mine.filter(r => r.status === "returned");
+  const myOther    = mine.filter(r => r.status !== "returned");
+
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "40px 28px" }}>
       {myPending.length > 0 && (
         <Section title="Needs Your Approval" items={myPending} empty="" showApprovers={false} />
       )}
+      {myReturned.length > 0 && (
+        <Section title="Returned — Action Needed" items={myReturned} empty="" showApprovers={true} />
+      )}
       <Section
         title={isAdmin ? "Submitted by You" : "My Requests"}
-        items={mine}
+        items={myOther}
         empty="No requests submitted yet."
         showApprovers={true}
       />
@@ -568,6 +584,121 @@ function SubmitForm({ user, onBack, onSuccess }) {
   );
 }
 
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+const ACTION_META = {
+  submitted: { label: "Submitted",  color: C.accent },
+  approved:  { label: "Approved",   color: C.green  },
+  rejected:  { label: "Rejected",   color: C.red    },
+  returned:  { label: "Sent Back",  color: C.amber  },
+  cancelled: { label: "Cancelled",  color: C.textMuted },
+};
+
+function buildAuditEvents(req) {
+  const events = [];
+
+  // Submitted
+  if (req.createdAt) {
+    events.push({
+      action: "submitted",
+      person: req.submittedBy?.name || req.submittedBy?.email || "Unknown",
+      date: req.createdAt,
+      comment: null,
+    });
+  }
+
+  // Approver decisions
+  for (const a of req.approvers || []) {
+    if (a.decidedAt && a.status !== "pending") {
+      events.push({
+        action: a.status,
+        person: a.name || a.email,
+        date: a.decidedAt,
+        comment: a.comment || null,
+      });
+    }
+  }
+
+  // Request-level returned
+  if (req.status === "returned" && req.returnComment) {
+    const returner = (req.approvers || []).find(a => a.status === "returned");
+    if (!returner?.decidedAt) {
+      events.push({
+        action: "returned",
+        person: returner?.name || returner?.email || "Approver",
+        date: req.updatedAt || req.createdAt,
+        comment: req.returnComment,
+      });
+    }
+  }
+
+  // Cancelled
+  if (req.status === "cancelled" && !events.some(e => e.action === "cancelled")) {
+    events.push({
+      action: "cancelled",
+      person: req.submittedBy?.name || "Admin",
+      date: req.updatedAt || req.createdAt,
+      comment: null,
+    });
+  }
+
+  events.sort((a, b) => new Date(a.date) - new Date(b.date));
+  return events;
+}
+
+function AuditLog({ req }) {
+  const events = buildAuditEvents(req);
+  if (events.length === 0) return null;
+
+  return (
+    <Card title="Audit Log">
+      <div style={{ position: "relative", paddingLeft: 20 }}>
+        {/* Vertical line */}
+        <div style={{
+          position: "absolute", left: 5, top: 4, bottom: 4, width: 2,
+          background: C.border, borderRadius: 1,
+        }} />
+
+        {events.map((ev, i) => {
+          const meta = ACTION_META[ev.action] || { label: ev.action, color: C.textMuted };
+          return (
+            <div key={i} style={{ position: "relative", paddingBottom: i < events.length - 1 ? 20 : 0 }}>
+              {/* Dot */}
+              <div style={{
+                position: "absolute", left: -17, top: 3,
+                width: 10, height: 10, borderRadius: "50%",
+                background: meta.color, border: `2px solid ${C.white}`,
+                boxShadow: `0 0 0 2px ${meta.color}33`,
+              }} />
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary }}>{ev.person}</span>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1,
+                      color: meta.color,
+                    }}>
+                      {meta.label}
+                    </span>
+                  </div>
+                  {ev.comment && (
+                    <div style={{ fontSize: 12, color: C.textSecondary, fontStyle: "italic", marginTop: 3 }}>
+                      "{ev.comment}"
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: C.textMuted, whiteSpace: "nowrap", flexShrink: 0 }}>
+                  {fmtDate(ev.date)}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 // ── Approval Detail ───────────────────────────────────────────────────────────
 function ApprovalDetail({ req: init, user, isAdmin, onBack }) {
   const [req, setReq]           = useState(init);
@@ -577,13 +708,17 @@ function ApprovalDetail({ req: init, user, isAdmin, onBack }) {
 
   const email      = user?.primaryEmailAddress?.emailAddress;
   const me         = req.approvers?.find(a => a.email === email);
-  const canDecide  = me?.status === "pending" && req.status === "pending";
+  const canDecide  = me?.status === "pending" && (req.status === "pending" || req.status === "returned");
   const overdue    = isOverdue(req.dueDate) && req.status === "pending";
   const approvedCount  = req.approvers?.filter(a => a.status === "approved").length || 0;
   const totalApprovers = req.approvers?.length || 0;
   const progressPct    = totalApprovers ? Math.round((approvedCount / totalApprovers) * 100) : 0;
 
   const decide = async () => {
+    if (deciding === "returned" && !comment.trim()) {
+      alert("Please explain what the submitter needs to fix.");
+      return;
+    }
     setSaving(true);
     try {
       const updated = await apiPatch(`/api/approvals/${req._id}/decide`, { decision: deciding, comment, approverEmail: email });
@@ -689,23 +824,29 @@ function ApprovalDetail({ req: init, user, isAdmin, onBack }) {
 
           {deciding && (
             <div style={{
-              background: deciding === "approved" ? C.greenBg : C.redBg,
-              border: `1px solid ${deciding === "approved" ? `${C.green}44` : `${C.red}44`}`,
+              background: deciding === "approved" ? C.greenBg : deciding === "returned" ? "rgba(217,119,6,0.06)" : C.redBg,
+              border: `1px solid ${deciding === "approved" ? `${C.green}44` : deciding === "returned" ? `${C.amber}44` : `${C.red}44`}`,
               borderRadius: 12, padding: 20,
             }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14, color: C.textPrimary }}>
-                {deciding === "approved" ? "Confirm Approval" : "Confirm Rejection"}
+                {deciding === "approved" ? "Confirm Approval" : deciding === "returned" ? "Send Back to Submitter" : "Confirm Rejection"}
               </div>
-              <Field as="textarea" label="Comment (optional)" value={comment} onChange={setComment}
-                placeholder={deciding === "approved" ? "Approved." : "Please provide a reason..."} rows={2} />
+              <Field as="textarea"
+                label={deciding === "returned" ? "What does the submitter need to fix? *" : "Comment (optional)"}
+                value={comment} onChange={setComment}
+                placeholder={deciding === "approved" ? "Approved." : deciding === "returned" ? "Describe what needs to be corrected or clarified…" : "Please provide a reason..."}
+                rows={2} />
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <Btn onClick={decide} variant={deciding === "approved" ? "success" : "danger"} disabled={saving}>
-                  {saving ? "Saving…" : deciding === "approved" ? "Confirm Approval" : "Confirm Rejection"}
+                <Btn onClick={decide} variant={deciding === "approved" ? "success" : deciding === "returned" ? "warn" : "danger"} disabled={saving}>
+                  {saving ? "Saving…" : deciding === "approved" ? "Confirm Approval" : deciding === "returned" ? "Send Back" : "Confirm Rejection"}
                 </Btn>
                 <Btn onClick={() => { setDeciding(null); setComment(""); }} variant="ghost">Back</Btn>
               </div>
             </div>
           )}
+
+          {/* Audit Log */}
+          <AuditLog req={req} />
         </div>
 
         {/* Right */}
@@ -719,13 +860,13 @@ function ApprovalDetail({ req: init, user, isAdmin, onBack }) {
               <div style={{ height: 3, background: "#edf0f4", borderRadius: 2 }}>
                 <div style={{
                   height: 3, borderRadius: 2, width: `${progressPct}%`,
-                  background: req.status === "approved" ? C.green : req.status === "rejected" ? C.red : C.accent,
+                  background: req.status === "approved" ? C.green : req.status === "rejected" ? C.red : req.status === "returned" ? C.amber : C.accent,
                   transition: "width 0.4s",
                 }} />
               </div>
             </div>
             {req.approvers?.map((a, i) => {
-              const statusColor = a.status === "approved" ? C.green : a.status === "rejected" ? C.red : C.textMuted;
+              const statusColor = a.status === "approved" ? C.green : a.status === "rejected" ? C.red : a.status === "returned" ? C.amber : C.textMuted;
               return (
                 <div key={i} style={{ paddingBottom: 12, marginBottom: 12, borderBottom: i < req.approvers.length - 1 ? "1px solid #edf0f4" : "none" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -752,6 +893,7 @@ function ApprovalDetail({ req: init, user, isAdmin, onBack }) {
             <Card title="Your Decision">
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <Btn onClick={() => setDeciding("approved")} variant="success" fullWidth>Approve</Btn>
+                <Btn onClick={() => setDeciding("returned")} variant="warn"    fullWidth>Send Back</Btn>
                 <Btn onClick={() => setDeciding("rejected")} variant="danger"  fullWidth>Reject</Btn>
               </div>
             </Card>
@@ -762,11 +904,11 @@ function ApprovalDetail({ req: init, user, isAdmin, onBack }) {
               padding: "12px 16px", background: C.white, border: `1px solid ${C.border}`,
               borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.06)", fontSize: 12, color: C.textMuted, textAlign: "center",
             }}>
-              You {me.status} this request on {fmtDate(me.decidedAt)}.
+              You {me.status === "returned" ? "sent back" : me.status} this request on {fmtDate(me.decidedAt)}.
             </div>
           )}
 
-          {isAdmin && req.status === "pending" && (
+          {isAdmin && (req.status === "pending" || req.status === "returned") && (
             <Btn onClick={cancel} variant="ghost" small>Cancel Request</Btn>
           )}
         </div>
@@ -816,7 +958,7 @@ function AdminPanel({ user, onView }) {
             color: C.textPrimary, fontSize: 12, fontFamily: "inherit", outline: "none",
           }}
         />
-        {["all", "pending", "approved", "rejected", "cancelled"].map(s => (
+        {["all", "pending", "approved", "rejected", "returned", "cancelled"].map(s => (
           <button key={s} onClick={() => setFilter(s)} style={{
             background: filter === s ? C.accent : C.white,
             border: `1px solid ${filter === s ? C.accent : C.border}`,
