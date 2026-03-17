@@ -420,8 +420,6 @@ function Dashboard({ user, isAdmin, onView }) {
       .finally(() => setLoading(false));
   }, [email]);
 
-  if (loading) return <DashboardSkeleton />;
-
   const myPending = toApprove.filter(r => {
     const me = r.approvers?.find(a => a.email === email);
     return me?.status === "pending" && r.status === "pending";
@@ -448,6 +446,8 @@ function Dashboard({ user, isAdmin, onView }) {
   useEffect(() => {
     try { localStorage.setItem("approvals_pending_count", String(pendingYourApprovalCount)); } catch {}
   }, [pendingYourApprovalCount]);
+
+  if (loading) return <DashboardSkeleton />;
 
   const Section = ({ title, items, empty, showApprovers }) => (
     <div style={{ marginBottom: 36 }}>
@@ -1087,8 +1087,7 @@ function SignInPage() {
       <SignIn
         appearance={{
           elements: {
-            card:             { background: "transparent", border: "none", boxShadow: "none", padding: 0 },
-            cardBox:          { boxShadow: "none" },
+            card:             { background: "transparent", boxShadow: "none", border: "none", padding: 0 },
             rootBox:          { boxShadow: "none" },
             headerTitle:      { color: C.textPrimary },
             headerSubtitle:   { color: C.textMuted },
