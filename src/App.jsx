@@ -197,6 +197,42 @@ function Loader() {
   return <div style={{ textAlign: "center", padding: 80, color: C.textMuted, fontSize: 13 }}>Loading…</div>;
 }
 
+function DashboardSkeleton() {
+  const shimmer = {
+    background: "linear-gradient(90deg, #e8ecf1 25%, #f4f6f9 50%, #e8ecf1 75%)",
+    backgroundSize: "200% 100%",
+    animation: "shimmer 1.5s infinite",
+    borderRadius: 8,
+  };
+  return (
+    <div style={{ maxWidth: 860, margin: "0 auto", padding: "40px 28px" }}>
+      <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
+      {/* Summary cards skeleton */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 36 }}>
+        {[1, 2, 3].map(i => (
+          <div key={i} style={{ flex: 1, background: C.white, borderRadius: 12, padding: "24px 20px", border: `1px solid ${C.border}`, borderLeft: "4px solid #e8ecf1" }}>
+            <div style={{ ...shimmer, width: 48, height: 32, marginBottom: 8 }} />
+            <div style={{ ...shimmer, width: 100, height: 14 }} />
+          </div>
+        ))}
+      </div>
+      {/* Section skeleton */}
+      {[1, 2].map(s => (
+        <div key={s} style={{ marginBottom: 36 }}>
+          <div style={{ ...shimmer, width: 160, height: 14, marginBottom: 12 }} />
+          {[1, 2, 3].map(i => (
+            <div key={i} style={{ background: C.white, borderRadius: 12, padding: 16, marginBottom: 6, border: `1px solid ${C.border}`, display: "flex", gap: 16, alignItems: "center" }}>
+              <div style={{ ...shimmer, width: 60, height: 16 }} />
+              <div style={{ ...shimmer, flex: 1, height: 16 }} />
+              <div style={{ ...shimmer, width: 80, height: 16 }} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Top Bar ───────────────────────────────────────────────────────────────────
 function TopBar({ user, isAdmin, pendingCount, page, setPage, onSignOut }) {
   return (
@@ -349,6 +385,22 @@ function RequestRow({ req, onClick, showApprovers }) {
   );
 }
 
+// ── Summary Card ─────────────────────────────────────────────────────────────
+function SummaryCard({ count, label, accentColor }) {
+  return (
+    <div style={{
+      flex: 1, background: C.white, borderRadius: 12,
+      padding: "24px 20px",
+      border: `1px solid ${C.border}`,
+      borderLeft: `4px solid ${accentColor}`,
+      boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+    }}>
+      <div style={{ fontSize: 28, fontWeight: 800, color: C.textPrimary }}>{count}</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginTop: 4, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+    </div>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function Dashboard({ user, isAdmin, onView }) {
   const [toApprove, setToApprove] = useState([]);
@@ -368,7 +420,7 @@ function Dashboard({ user, isAdmin, onView }) {
       .finally(() => setLoading(false));
   }, [email]);
 
-  if (loading) return <Loader />;
+  if (loading) return <DashboardSkeleton />;
 
   const myPending = toApprove.filter(r => {
     const me = r.approvers?.find(a => a.email === email);
@@ -378,6 +430,24 @@ function Dashboard({ user, isAdmin, onView }) {
     const me = r.approvers?.find(a => a.email === email);
     return me && me.status !== "pending";
   });
+
+  // Sort pending: overdue/soonest due first, then by amount descending
+  const sortedPending = [...myPending].sort((a, b) => {
+    const da = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+    const db = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+    if (da !== db) return da - db;
+    return (b.amount || 0) - (a.amount || 0);
+  });
+
+  // Summary counts
+  const pendingYourApprovalCount = myPending.length;
+  const awaitingApprovalCount = mine.filter(r => r.status === "pending").length;
+  const completedCount = mine.filter(r => r.status === "approved" || r.status === "rejected").length;
+
+  // Sync pending count to localStorage for external use
+  useEffect(() => {
+    try { localStorage.setItem("approvals_pending_count", String(pendingYourApprovalCount)); } catch {}
+  }, [pendingYourApprovalCount]);
 
   const Section = ({ title, items, empty, showApprovers }) => (
     <div style={{ marginBottom: 36 }}>
@@ -405,14 +475,20 @@ function Dashboard({ user, isAdmin, onView }) {
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "40px 28px" }}>
-      {myPending.length > 0 && (
-        <Section title="Needs Your Approval" items={myPending} empty="" showApprovers={false} />
-      )}
+      {/* Summary Cards */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 36 }}>
+        <SummaryCard count={pendingYourApprovalCount} label="Pending Your Approval" accentColor={C.amber} />
+        <SummaryCard count={awaitingApprovalCount} label="Awaiting Approval" accentColor={C.accent} />
+        <SummaryCard count={completedCount} label="Completed" accentColor={C.green} />
+      </div>
+
+      {/* Requires Your Approval — sorted by due date asc, amount desc */}
+      <Section title="Requires Your Approval" items={sortedPending} empty="No pending approvals." showApprovers={false} />
       {myReturned.length > 0 && (
         <Section title="Returned — Action Needed" items={myReturned} empty="" showApprovers={true} />
       )}
       <Section
-        title={isAdmin ? "Submitted by You" : "My Requests"}
+        title="Submitted by You"
         items={myOther}
         empty="No requests submitted yet."
         showApprovers={true}
@@ -1011,7 +1087,9 @@ function SignInPage() {
       <SignIn
         appearance={{
           elements: {
-            card:             { background: C.white, border: `1px solid ${C.border}`, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" },
+            card:             { background: "transparent", border: "none", boxShadow: "none", padding: 0 },
+            cardBox:          { boxShadow: "none" },
+            rootBox:          { boxShadow: "none" },
             headerTitle:      { color: C.textPrimary },
             headerSubtitle:   { color: C.textMuted },
             formFieldLabel:   { color: C.textSecondary },
@@ -1045,13 +1123,14 @@ function AppInner() {
           return me?.status === "pending" && r.status === "pending";
         }).length;
         setPendingCount(count);
+        try { localStorage.setItem("approvals_pending_count", String(count)); } catch {}
       })
       .catch(() => {});
   }, [user, page]);
 
   if (!isLoaded) return (
-    <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMuted, fontSize: 13 }}>
-      Loading…
+    <div style={{ minHeight: "100vh", background: C.bg }}>
+      <DashboardSkeleton />
     </div>
   );
 
