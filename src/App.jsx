@@ -401,21 +401,32 @@ function SummaryCard({ count, label, accentColor }) {
   );
 }
 
+// ── Dashboard cache ───────────────────────────────────────────────────────────
+const dashboardCache = { email: null, toApprove: null, mine: null };
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function Dashboard({ user, isAdmin, onView }) {
-  const [toApprove, setToApprove] = useState([]);
-  const [mine, setMine]           = useState([]);
-  const [loading, setLoading]     = useState(true);
   const email = user?.primaryEmailAddress?.emailAddress;
+  const hasCached = dashboardCache.email === email && dashboardCache.toApprove !== null;
+
+  const [toApprove, setToApprove] = useState(hasCached ? dashboardCache.toApprove : []);
+  const [mine, setMine]           = useState(hasCached ? dashboardCache.mine : []);
+  const [loading, setLoading]     = useState(!hasCached);
 
   useEffect(() => {
     if (!email) return;
-    setLoading(true);
+    if (!hasCached) setLoading(true);
     Promise.all([
       apiGet(`/api/approvals?assignedTo=${encodeURIComponent(email)}`),
       apiGet(`/api/approvals?submittedBy=${encodeURIComponent(email)}`),
     ])
-      .then(([a, m]) => { setToApprove(a); setMine(m); })
+      .then(([a, m]) => {
+        dashboardCache.email = email;
+        dashboardCache.toApprove = a;
+        dashboardCache.mine = m;
+        setToApprove(a);
+        setMine(m);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [email]);
